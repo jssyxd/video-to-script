@@ -1,0 +1,13 @@
+groq:
+  api_key: "YOUR_GROQ_API_KEY"
+  base_url: "https://api.groq.com/openai/v1"
+
+whisper:
+  model: "whisper-large-v3"
+
+llm:
+  model: "llama-3.3-70b-versatile"
+
+audio:
+  sample_rate: 16000
+  channels: 1

@@ -1,7 +1,26 @@
 {
-  "framework": null,
-  "buildCommand": "pip install -r requirements.txt",
-  "devCommand": "uvicorn app.main:app --port 5000",
-  "installCommand": "pip install -r requirements.txt",
-  "regions": ["iad1"]
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.py",
+      "use": "@vercel/python",
+      "config": {
+        "excludeFiles": "{app/services/**,app/routes/**,static/**,*.test.py}"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/static/index.html"
+    }
+  ]
 }

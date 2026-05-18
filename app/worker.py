@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Background Worker - Process transcription jobs"""
+"""Background Worker - Process transcription jobs with proper locking"""
 
 import os
 import time
@@ -13,6 +13,7 @@ from app.services.translator import translate_segments
 
 DATABASE_URL = os.getenv("DATABASE_URL", "/app/data/video_to_script.db")
 TEMP_DIR = "/app/data/temp"
+LOCK_TIMEOUT = 30  # seconds
 
 def update_job_status(job_id: str, status: str, error_message: str = None):
     """Update job status in database"""
@@ -82,9 +83,12 @@ def process_job(job_id: str):
             return
 
         # Step 4: Whisper transcription
+        print(f"Transcribing audio for job {job_id}")
         segments = transcribe_audio(opus_path)
+        print(f"Transcription complete: {len(segments)} segments")
 
         # Step 5: Translate
+        print(f"Translating for job {job_id}")
         translation = translate_segments(segments)
 
         # Step 6: Save results
@@ -98,29 +102,47 @@ def process_job(job_id: str):
             pass
 
         update_job_status(job_id, "completed")
+        print(f"Job {job_id} completed successfully")
 
     except Exception as e:
         update_job_status(job_id, "failed", str(e))
+        print(f"Job {job_id} failed: {str(e)}")
 
 def poll_jobs():
-    """Poll for pending jobs"""
+    """Poll for pending jobs with row-level locking for horizontal scaling"""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1")
+        # Use UPDATE with WHERE to atomically claim a job
+        cursor.execute("""
+            UPDATE jobs
+            SET status = 'processing', updated_at = CURRENT_TIMESTAMP
+            WHERE id = (
+                SELECT id FROM jobs
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT 1
+            )
+            RETURNING id
+        """)
         row = cursor.fetchone()
+        conn.commit()
         if row:
             return row[0]
     return None
 
 def run_worker():
     """Worker main loop"""
-    print("Worker started")
+    print("Worker started, polling for jobs...")
     while True:
-        job_id = poll_jobs()
-        if job_id:
-            print(f"Processing job: {job_id}")
-            process_job(job_id)
-        else:
+        try:
+            job_id = poll_jobs()
+            if job_id:
+                print(f"Claimed job: {job_id}")
+                process_job(job_id)
+            else:
+                time.sleep(5)
+        except Exception as e:
+            print(f"Worker error: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":

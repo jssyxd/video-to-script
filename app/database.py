@@ -35,6 +35,7 @@ def init_db():
             english_text TEXT NOT NULL,
             chinese_text TEXT NOT NULL,
             segment_index INTEGER NOT NULL,
+            is_translated INTEGER DEFAULT 1,
             FOREIGN KEY (job_id) REFERENCES jobs(id)
         )
     """)

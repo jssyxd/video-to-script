@@ -30,15 +30,15 @@ def update_job_status(job_id: str, status: str, error_message: str = None):
             )
         conn.commit()
 
-def save_transcripts(job_id: str, transcripts: list):
+def save_transcripts(job_id: str, translation: dict):
     """Save transcription results to database"""
     with get_db() as conn:
         cursor = conn.cursor()
-        for idx, seg in enumerate(transcripts):
-            cursor.execute(
-                "INSERT INTO transcripts (job_id, english_text, chinese_text, segment_index) VALUES (?, ?, ?, ?)",
-                (job_id, seg["english"], seg["chinese"], idx)
-            )
+        # Store the full translations
+        cursor.execute(
+            "INSERT INTO transcripts (job_id, english_text, chinese_text, segment_index, is_translated) VALUES (?, ?, ?, ?, ?)",
+            (job_id, translation["english"], translation["chinese"], 0, 1 if translation["is_translated"] else 0)
+        )
         conn.commit()
 
 def process_job(job_id: str):
@@ -69,29 +69,31 @@ def process_job(job_id: str):
             update_job_status(job_id, "failed", f"Download failed: {error}")
             return
 
-        # Step 3: Convert audio format with FFmpeg
-        wav_path = audio_path.replace(".m4a", ".wav")
+        # Step 3: Convert and compress audio
+        opus_path = audio_path.replace(".m4a", ".opus")
         result = subprocess.run([
             "ffmpeg", "-y", "-i", audio_path,
-            "-ar", "16000", "-ac", "1", wav_path
+            "-ar", "16000", "-ac", "1",
+            "-codec:a", "libopus", "-b:a", "32k",
+            opus_path
         ], capture_output=True, text=True)
         if result.returncode != 0:
             update_job_status(job_id, "failed", f"Audio conversion failed: {result.stderr}")
             return
 
         # Step 4: Whisper transcription
-        segments = transcribe_audio(wav_path)
+        segments = transcribe_audio(opus_path)
 
         # Step 5: Translate
-        transcripts = translate_segments(segments)
+        translation = translate_segments(segments)
 
         # Step 6: Save results
-        save_transcripts(job_id, transcripts)
+        save_transcripts(job_id, translation)
 
         # Cleanup temp files
         try:
             os.unlink(audio_path)
-            os.unlink(wav_path)
+            os.unlink(opus_path)
         except:
             pass
 

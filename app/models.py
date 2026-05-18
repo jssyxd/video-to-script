@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl
-from typing import Optional, List
+from typing import Optional
 from enum import Enum
 
 class JobStatus(str, Enum):
@@ -20,9 +20,10 @@ class CreateJobResponse(BaseModel):
     job_id: str
     status: JobStatus
 
-class TranscriptSegment(BaseModel):
-    english: str
+class TranscriptResult(BaseModel):
     chinese: str
+    english: str
+    is_translated: bool
 
 class JobResponse(BaseModel):
     job_id: str
@@ -31,4 +32,4 @@ class JobResponse(BaseModel):
     platform: Optional[Platform] = None
     progress: Optional[int] = None
     error_message: Optional[str] = None
-    transcript: Optional[List[TranscriptSegment]] = None
+    transcript: Optional[TranscriptResult] = None

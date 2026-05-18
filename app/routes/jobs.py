@@ -55,13 +55,15 @@ async def get_job(job_id: str):
         # If completed, get transcription results
         if row[3] == "completed":
             cursor.execute(
-                "SELECT english_text, chinese_text FROM transcripts WHERE job_id = ? ORDER BY segment_index",
+                "SELECT english_text, chinese_text, is_translated FROM transcripts WHERE job_id = ? ORDER BY segment_index LIMIT 1",
                 (job_id,)
             )
-            transcripts = [
-                {"english": r[0], "chinese": r[1]}
-                for r in cursor.fetchall()
-            ]
-            job["transcript"] = transcripts
+            transcript_row = cursor.fetchone()
+            if transcript_row:
+                job["transcript"] = {
+                    "chinese": transcript_row[1],
+                    "english": transcript_row[0],
+                    "is_translated": bool(transcript_row[2])
+                }
 
         return JobResponse(**job)

@@ -1,16 +1,7 @@
 {
-  "framework": "fastify",
+  "framework": null,
   "buildCommand": "pip install -r requirements.txt",
   "devCommand": "uvicorn app.main:app --port 5000",
   "installCommand": "pip install -r requirements.txt",
-  "regions": ["iad1"],
-  "functions": {
-    "app/main.py": {
-      "runtime": "python3.13"
-    }
-  },
-  "env": {
-    "DATABASE_URL": "/tmp/video_to_script.db",
-    "AUDIO_TEMP_DIR": "/tmp/audio_temp"
-  }
+  "regions": ["iad1"]
 }

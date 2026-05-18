@@ -1,22 +1,26 @@
 import os
 import sys
 
-# Add parent to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure the project root is in the path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
+# Now we can import from app/ which is at project root level
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-app = FastAPI()
-
-# Import routes
+# Initialize database and routes
+from app.database import init_db
 from app.routes import jobs
 
+init_db()
+
+app = FastAPI()
 app.include_router(jobs.router)
 
 # Serve static files
-static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+static_dir = os.path.join(project_root, "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 

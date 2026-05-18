@@ -1,26 +1,32 @@
+# render.yaml - Video to Script deployment
+# NOTE: FFmpeg is now OPTIONAL - only needed for URL-based jobs (YouTube/Bilibili)
+# For browser-upload mode (ffmpeg.wasm), no server FFmpeg is required
+
 services:
   - type: web
     name: video-to-script-web
     env: python
-    buildCommand: pip install -r requirements.txt && apt-get install -y ffmpeg
+    # Remove apt-get install ffmpeg if only using browser mode
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 5000
     envVars:
       - key: GROQ_API_KEY
         sync: false
-      - key: BILIBILI_COOKIE
-        sync: false
       - key: DATABASE_URL
         value: /app/data/video_to_script.db
+      - key: AUDIO_TEMP_DIR
+        value: /app/data/audio_temp
 
   - type: worker
     name: video-to-script-worker
     env: python
-    buildCommand: pip install -r requirements.txt && apt-get install -y ffmpeg
+    # Remove apt-get install ffmpeg if only using browser mode
+    buildCommand: pip install -r requirements.txt
     startCommand: python -m app.worker
     envVars:
       - key: GROQ_API_KEY
         sync: false
-      - key: BILIBILI_COOKIE
-        sync: false
       - key: DATABASE_URL
         value: /app/data/video_to_script.db
+      - key: AUDIO_TEMP_DIR
+        value: /app/data/audio_temp

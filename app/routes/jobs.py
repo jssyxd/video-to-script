@@ -1,5 +1,6 @@
 import uuid
-from fastapi import APIRouter, HTTPException
+import os
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from app.models import (
     CreateJobRequest, CreateJobResponse,
     JobResponse, JobStatus, Platform
@@ -8,6 +9,39 @@ from app.database import get_db
 from app.services.downloader import detect_platform
 
 router = APIRouter(prefix="/api", tags=["jobs"])
+
+# Temp directory for uploaded audio files
+AUDIO_TEMP_DIR = os.getenv("AUDIO_TEMP_DIR", "/app/data/audio_temp")
+os.makedirs(AUDIO_TEMP_DIR, exist_ok=True)
+
+@router.post("/audio", response_model=CreateJobResponse)
+async def upload_audio(file: UploadFile = File(...)):
+    """Handle audio file upload for browser-extracted audio transcription"""
+    # Validate file type
+    if not file.content_type.startswith('audio/'):
+        raise HTTPException(status_code=400, detail="File must be an audio file")
+
+    # Save the uploaded audio file
+    audio_id = str(uuid.uuid4())
+    audio_path = os.path.join(AUDIO_TEMP_DIR, f"{audio_id}.wav")
+
+    with open(audio_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    video_url = f"browser-upload:{audio_id}"
+
+    job_id = str(uuid.uuid4())
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO jobs (id, video_url, platform, status) VALUES (?, ?, ?, ?)",
+            (job_id, video_url, platform, "pending")
+        )
+        conn.commit()
+
+    return CreateJobResponse(job_id=job_id, status=JobStatus.PENDING)
 
 @router.post("/jobs", response_model=CreateJobResponse)
 async def create_job(request: CreateJobRequest):

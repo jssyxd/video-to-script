@@ -9,39 +9,236 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
         h1 { text-align: center; margin-bottom: 20px; color: #333; }
         .container { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
-        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
-        button { padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
+        .upload-area { border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; margin-bottom: 20px; cursor: pointer; transition: border-color 0.3s; }
+        .upload-area:hover { border-color: #007bff; }
+        .upload-area.dragover { border-color: #007bff; background: #f0f7ff; }
+        input[type="file"] { display: none; }
+        .upload-icon { font-size: 48px; margin-bottom: 10px; }
+        .upload-text { color: #666; margin-bottom: 10px; }
+        .file-info { margin-top: 10px; font-weight: bold; color: #333; }
+        .progress-container { margin-bottom: 20px; }
+        .progress-bar { height: 24px; background: #e9ecef; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #007bff; transition: width 0.3s; }
+        .progress-text { margin-top: 5px; font-size: 14px; color: #666; }
         .status { padding: 15px; background: #f8f9fa; border-radius: 4px; margin-bottom: 20px; }
         .status.pending { border-left: 4px solid #ffc107; }
         .status.processing { border-left: 4px solid #007bff; }
         .status.completed { border-left: 4px solid #28a745; }
         .status.failed { border-left: 4px solid #dc3545; }
         .transcript { line-height: 1.8; }
-        .segment { margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; }
-        .segment h3 { color: #333; margin-bottom: 10px; }
-        .english { color: #555; margin-bottom: 10px; }
-        .chinese { color: #007bff; }
+        .transcript-section { margin-bottom: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px; }
+        .transcript-section h2 { color: #333; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #ddd; }
+        .transcript-content { font-size: 16px; line-height: 2; white-space: pre-wrap; }
+        .english .transcript-content { color: #555; }
+        .chinese .transcript-content { color: #007bff; }
         .error { color: #dc3545; }
         .loading { text-align: center; padding: 20px; color: #666; }
+        button { padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .method-toggle { text-align: center; margin-bottom: 20px; }
+        .method-toggle button { background: #6c757d; margin: 0 5px; }
+        .method-toggle button.active { background: #007bff; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
     <h1>Video to Script</h1>
     <div class="container">
-        <div class="input-group">
-            <input type="text" id="urlInput" placeholder="Paste video URL (YouTube / Bilibili)" />
-            <button id="submitBtn" onclick="submitJob()">Transcribe</button>
+        <div class="method-toggle">
+            <button id="browserModeBtn" class="active" onclick="switchMode('browser')">Browser Extract (No Server FFmpeg)</button>
+            <button id="urlModeBtn" onclick="switchMode('url')">URL Mode (Server Processing)</button>
         </div>
+
+        <!-- Browser mode: File upload -->
+        <div id="browserMode">
+            <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-icon">📹</div>
+                <div class="upload-text">Click or drag video file here</div>
+                <div class="upload-text" style="font-size: 12px;">Supports MP4, WebM, MOV, AVI, MKV</div>
+                <input type="file" id="fileInput" accept="video/*" onchange="handleFileSelect(event)" />
+            </div>
+            <div id="fileInfo" class="file-info hidden"></div>
+
+            <div id="progressArea" class="progress-container hidden">
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+                </div>
+                <div id="progressText" class="progress-text">Initializing...</div>
+            </div>
+
+            <button id="processBtn" onclick="processVideo()" disabled>Extract & Transcribe</button>
+        </div>
+
+        <!-- URL mode: Traditional -->
+        <div id="urlMode" class="hidden">
+            <div class="input-group">
+                <input type="text" id="urlInput" placeholder="Paste video URL (YouTube / Bilibili)" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:4px;font-size:16px;" />
+                <button id="submitBtn" onclick="submitJob()">Transcribe</button>
+            </div>
+        </div>
+
         <div id="statusArea"></div>
         <div id="resultArea"></div>
     </div>
 
+    <!-- ffmpeg.wasm -->
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/util.js"></script>
+
     <script>
         let pollingInterval = null;
+        let selectedFile = null;
+        let ffmpeg = null;
 
+        // ============ Mode Switching ============
+        function switchMode(mode) {
+            const browserBtn = document.getElementById('browserModeBtn');
+            const urlBtn = document.getElementById('urlModeBtn');
+            const browserDiv = document.getElementById('browserMode');
+            const urlDiv = document.getElementById('urlMode');
+
+            if (mode === 'browser') {
+                browserBtn.classList.add('active');
+                urlBtn.classList.remove('active');
+                browserDiv.classList.remove('hidden');
+                urlDiv.classList.add('hidden');
+            } else {
+                urlBtn.classList.add('active');
+                browserBtn.classList.remove('active');
+                browserDiv.classList.add('hidden');
+                urlDiv.classList.remove('hidden');
+            }
+            clearUI();
+        }
+
+        // ============ Browser Mode (ffmpeg.wasm) ============
+        async function initFFmpeg() {
+            if (ffmpeg) return ffmpeg;
+            ffmpeg = new FFmpeg();
+            ffmpeg.on('progress', ({ progress }) => {
+                updateProgress(Math.round(progress * 80)); // 0-80% for extraction
+            });
+            await ffmpeg.load();
+            return ffmpeg;
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            selectedFile = file;
+            document.getElementById('fileInfo').textContent = `Selected: ${file.name} (${formatSize(file.size)})`;
+            document.getElementById('fileInfo').classList.remove('hidden');
+            document.getElementById('processBtn').disabled = false;
+            document.getElementById('processBtn').textContent = 'Extract & Transcribe';
+        }
+
+        // Drag and drop
+        const dropZone = document.getElementById('dropZone');
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('video/')) {
+                selectedFile = file;
+                document.getElementById('fileInput').files = [file];
+                document.getElementById('fileInfo').textContent = `Selected: ${file.name} (${formatSize(file.size)})`;
+                document.getElementById('fileInfo').classList.remove('hidden');
+                document.getElementById('processBtn').disabled = false;
+            }
+        });
+
+        async function processVideo() {
+            if (!selectedFile) return;
+
+            const btn = document.getElementById('processBtn');
+            btn.disabled = true;
+            btn.textContent = 'Loading FFmpeg...';
+
+            try {
+                // Step 1: Initialize FFmpeg
+                updateProgress(5, 'Loading FFmpeg (first time ~10MB download)...');
+                await initFFmpeg();
+                updateProgress(10, 'FFmpeg loaded, starting extraction...');
+
+                // Step 2: Write video file to FFmpeg filesystem
+                const { fetchFile } = FFmpegUtil;
+                const inputName = 'input' + getExtension(selectedFile.name);
+                const outputName = 'audio.wav';
+
+                await ffmpeg.writeFile(inputName, await fetchFile(selectedFile));
+                updateProgress(20, 'Video loaded, extracting audio...');
+
+                // Step 3: Extract audio using FFmpeg (16kHz mono for Whisper)
+                await ffmpeg.exec([
+                    '-i', inputName,
+                    '-vn', '-acodec', 'pcm_s16le',
+                    '-ar', '16000', '-ac', '1',
+                    '-y', outputName
+                ]);
+
+                updateProgress(85, 'Audio extracted, uploading to server...');
+
+                // Step 4: Read the audio file
+                const audioData = await ffmpeg.readFile(outputName);
+                const audioBlob = new Blob([audioData.buffer], { type: 'audio/wav' });
+
+                // Cleanup FFmpeg filesystem
+                await ffmpeg.deleteFile(inputName);
+                await ffmpeg.deleteFile(outputName);
+
+                // Step 5: Upload audio and transcribe
+                updateProgress(90, 'Transcribing...');
+                await uploadAndTranscribe(audioBlob);
+
+            } catch (err) {
+                console.error('Processing error:', err);
+                document.getElementById('statusArea').innerHTML =
+                    `<div class="status failed">Error: ${err.message}</div>`;
+                btn.disabled = false;
+                btn.textContent = 'Extract & Transcribe';
+            }
+        }
+
+        async function uploadAndTranscribe(audioBlob) {
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'audio.wav');
+
+            updateProgress(92, 'Uploading audio...');
+
+            const res = await fetch('/api/audio', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Upload failed');
+            }
+
+            const data = await res.json();
+            startPolling(data.job_id);
+        }
+
+        function updateProgress(percent, text) {
+            document.getElementById('progressArea').classList.remove('hidden');
+            document.getElementById('progressFill').style.width = percent + '%';
+            if (text) document.getElementById('progressText').textContent = text;
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function getExtension(filename) {
+            return '.' + filename.split('.').pop().toLowerCase();
+        }
+
+        // ============ URL Mode (Original) ============
         async function submitJob() {
             const url = document.getElementById('urlInput').value.trim();
             if (!url) {
@@ -65,11 +262,13 @@
 
                 startPolling(data.job_id);
             } catch (err) {
-                document.getElementById('statusArea').innerHTML = `<div class="status failed">Error: ${err.message}</div>`;
+                document.getElementById('statusArea').innerHTML =
+                    `<div class="status failed">Error: ${err.message}</div>`;
                 btn.disabled = false;
             }
         }
 
+        // ============ Common ============
         async function startPolling(jobId) {
             pollingInterval = setInterval(() => pollJob(jobId), 3000);
             await pollJob(jobId);
@@ -85,15 +284,18 @@
                 updateUI(data);
             } catch (err) {
                 clearInterval(pollingInterval);
-                document.getElementById('statusArea').innerHTML = `<div class="status failed">Error: ${err.message}</div>`;
+                document.getElementById('statusArea').innerHTML =
+                    `<div class="status failed">Error: ${err.message}</div>`;
                 document.getElementById('submitBtn').disabled = false;
+                document.getElementById('processBtn').disabled = false;
             }
         }
 
         function updateUI(data) {
             const statusArea = document.getElementById('statusArea');
             const resultArea = document.getElementById('resultArea');
-            const btn = document.getElementById('submitBtn');
+            const submitBtn = document.getElementById('submitBtn');
+            const processBtn = document.getElementById('processBtn');
 
             let statusHtml = `<div class="status ${data.status}">`;
             statusHtml += `<strong>Status:</strong> ${data.status}`;
@@ -103,27 +305,51 @@
             else if (data.status === 'completed') {
                 statusHtml += ' <strong>Done!</strong>';
                 clearInterval(pollingInterval);
-                btn.disabled = false;
+                if (submitBtn) submitBtn.disabled = false;
+                if (processBtn) { processBtn.disabled = false; processBtn.textContent = 'Extract & Transcribe'; }
             }
             else if (data.status === 'failed') {
                 statusHtml += ` <span class="error">Error: ${data.error_message}</span>`;
                 clearInterval(pollingInterval);
-                btn.disabled = false;
+                if (submitBtn) submitBtn.disabled = false;
+                if (processBtn) { processBtn.disabled = false; processBtn.textContent = 'Extract & Transcribe'; }
             }
 
             statusHtml += '</div>';
             statusArea.innerHTML = statusHtml;
 
-            if (data.transcript && data.transcript.length > 0) {
-                let html = '<h2 style="margin: 20px 0;">Transcription</h2>';
-                data.transcript.forEach((seg, i) => {
-                    html += `<div class="segment">
-                        <div class="english"><strong>English:</strong><br>${seg.english}</div>
-                        <div class="chinese"><strong>Chinese:</strong><br>${seg.chinese}</div>
-                    </div>`;
-                });
-                resultArea.innerHTML = html;
+            // Update progress for browser mode
+            if (data.status === 'processing') {
+                updateProgress(95, 'Server processing (transcription + translation)...');
             }
+
+            // Display transcript
+            if (data.transcript) {
+                resultArea.innerHTML = `
+                    <div class="transcript-section chinese">
+                        <h2>中文</h2>
+                        <div class="transcript-content">${data.transcript.chinese}</div>
+                    </div>
+                    <div class="transcript-section english">
+                        <h2>English</h2>
+                        <div class="transcript-content">${data.transcript.english}</div>
+                    </div>
+                `;
+            }
+        }
+
+        function clearUI() {
+            clearInterval(pollingInterval);
+            document.getElementById('statusArea').innerHTML = '';
+            document.getElementById('resultArea').innerHTML = '';
+            document.getElementById('progressArea').classList.add('hidden');
+            document.getElementById('fileInfo').classList.add('hidden');
+            selectedFile = null;
+            selectedFile = null;
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput) fileInput.value = '';
+            const processBtn = document.getElementById('processBtn');
+            if (processBtn) { processBtn.disabled = true; processBtn.textContent = 'Extract & Transcribe'; }
         }
     </script>
 </body>

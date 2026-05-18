@@ -13,6 +13,7 @@ from app.services.translator import translate_segments
 
 DATABASE_URL = os.getenv("DATABASE_URL", "/app/data/video_to_script.db")
 TEMP_DIR = "/app/data/temp"
+AUDIO_TEMP_DIR = os.getenv("AUDIO_TEMP_DIR", "/app/data/audio_temp")
 LOCK_TIMEOUT = 30  # seconds
 
 def update_job_status(job_id: str, status: str, error_message: str = None):
@@ -54,14 +55,47 @@ def process_job(job_id: str):
         video_url = row[0]
 
     update_job_status(job_id, "processing")
-
     os.makedirs(TEMP_DIR, exist_ok=True)
 
     try:
-        # Step 1: Detect platform
+        # Check if this is a browser-upload job
+        if video_url.startswith("browser-upload:"):
+            # Browser-upload: audio file is already on disk
+            audio_id = video_url.replace("browser-upload:", "")
+            audio_path = os.path.join(AUDIO_TEMP_DIR, f"{audio_id}.wav")
+
+            if not os.path.exists(audio_path):
+                update_job_status(job_id, "failed", f"Audio file not found: {audio_id}")
+                return
+
+            print(f"Processing browser-upload job {job_id}: {audio_path}")
+
+            # Step 1: Whisper transcription (audio already in correct format)
+            print(f"Transcribing audio for job {job_id}")
+            segments = transcribe_audio(audio_path)
+            print(f"Transcription complete: {len(segments)} segments")
+
+            # Step 2: Translate
+            print(f"Translating for job {job_id}")
+            translation = translate_segments(segments)
+
+            # Step 3: Save results
+            save_transcripts(job_id, translation)
+
+            # Cleanup
+            try:
+                os.unlink(audio_path)
+            except:
+                pass
+
+            update_job_status(job_id, "completed")
+            print(f"Job {job_id} completed successfully")
+            return
+
+        # URL-based job (YouTube/Bilibili)
         platform = detect_platform(video_url)
 
-        # Step 2: Download audio
+        # Step 1: Download audio
         with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False, dir=TEMP_DIR) as tmp:
             audio_path = tmp.name
 
@@ -70,7 +104,7 @@ def process_job(job_id: str):
             update_job_status(job_id, "failed", f"Download failed: {error}")
             return
 
-        # Step 3: Convert and compress audio
+        # Step 2: Convert and compress audio
         opus_path = audio_path.replace(".m4a", ".opus")
         result = subprocess.run([
             "ffmpeg", "-y", "-i", audio_path,
@@ -82,16 +116,16 @@ def process_job(job_id: str):
             update_job_status(job_id, "failed", f"Audio conversion failed: {result.stderr}")
             return
 
-        # Step 4: Whisper transcription
+        # Step 3: Whisper transcription
         print(f"Transcribing audio for job {job_id}")
         segments = transcribe_audio(opus_path)
         print(f"Transcription complete: {len(segments)} segments")
 
-        # Step 5: Translate
+        # Step 4: Translate
         print(f"Translating for job {job_id}")
         translation = translate_segments(segments)
 
-        # Step 6: Save results
+        # Step 5: Save results
         save_transcripts(job_id, translation)
 
         # Cleanup temp files

@@ -49,7 +49,7 @@ def get_db():
         conn.close()
 
 # ============== FastAPI ==============
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
 
 app = FastAPI()
@@ -101,8 +101,12 @@ async def get_job(job_id: str):
         return job
 
 @app.post("/api/jobs")
-async def create_job(request: dict):
-    video_url = request.get("video_url", "")
+async def create_job(request: Request):
+    try:
+        body = await request.json()
+    except:
+        body = {}
+    video_url = body.get("video_url", "")
     if not video_url:
         raise HTTPException(status_code=400, detail="video_url required")
 
